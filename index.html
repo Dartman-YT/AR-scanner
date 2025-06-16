@@ -1,220 +1,234 @@
 <!DOCTYPE html><html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Romantic AR Overlay</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart AR Polaroid (AI Match)</title>
+  <script async src="https://docs.opencv.org/master/opencv.js" type="text/javascript"></script>
   <style>
     body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
+      font-family: Arial, sans-serif;
       background: linear-gradient(to right, #fce4ec, #f8bbd0);
-      color: #333;
+      margin: 0;
+      padding: 2rem;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding-top: 2rem;
-      min-height: 100vh;
-      overflow-x: hidden;
     }
     h1 {
-      font-size: 2rem;
       color: #d81b60;
-      margin-bottom: 1rem;
     }
-    #cameraContainer {
-      position: relative;
-      width: 90vw;
-      max-width: 600px;
-      height: 60vh;
-      background: #fce4ec;
+    video, canvas, img {
+      max-width: 90vw;
+      max-height: 50vh;
       border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+      margin: 1rem 0;
     }
-    #video, #overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      border: none;
-      z-index: 1;
-    }
-    #overlay {
-      z-index: 2;
-      pointer-events: none;
-      display: none;
-    }
-    #controls, #linkForm {
-      margin-top: 1.5rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      justify-content: center;
-    }
-    .button, label[for="upload"], label[for="import"] {
-      padding: 10px 20px;
-      background-color: #d81b60;
-      color: white;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-    }
-    input[type="file"], input[type="text"], select {
-      padding: 8px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-    }
-    form {
-      background: rgba(255, 255, 255, 0.8);
-      padding: 1rem;
-      border-radius: 12px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    form, #controls {
+      margin-top: 1rem;
       display: flex;
       flex-direction: column;
       gap: 10px;
-      max-width: 400px;
-      margin: 1rem auto;
+      background: white;
+      padding: 1rem;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
-    canvas { display: none; }
+    .button {
+      padding: 0.5rem 1rem;
+      background: #d81b60;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <h1>💕 Romantic AR Polaroid Viewer 💕</h1>  <div id="cameraContainer">
-    <video id="video" autoplay playsinline muted></video>
-    <img id="overlay" />
-  </div>
-  <canvas id="canvas"></canvas>  <div id="controls">
+  <h1>💕 AI AR Polaroid Viewer</h1>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <img id="overlay" style="display:none; position:absolute; top:10%; left:50%; transform:translateX(-50%); max-width:80vw;">  <div id="controls">
     <button class="button" onclick="startCamera()">Start Camera</button>
-    <label class="button" for="upload">Upload Polaroid</label>
-    <input type="file" id="upload" accept="image/*" style="display: none;" />
+    <input type="file" id="uploadPolaroid" accept="image/*">
     <button class="button" onclick="exportLinks()">Export Links</button>
-    <label class="button" for="import">Import</label>
-    <input type="file" id="import" accept="application/json" style="display: none;" />
+    <input type="file" id="importLinks" accept="application/json">
   </div>  <form id="linkForm">
-    <h3>🔗 Create a Link</h3>
-    <input type="file" id="polaroidInput" accept="image/*" required />
-    <select id="linkType">
-      <option value="image">Image</option>
-      <option value="video">Video</option>
-    </select>
-    <input type="file" id="linkFile" accept="image/*,video/*" required />
-    <button type="submit" class="button">Link It!</button>
+    <h3>Create AR Link</h3>
+    <label>Polaroid Image: <input type="file" id="linkPolaroid" accept="image/*" required></label>
+    <label>Overlay Type:
+      <select id="overlayType">
+        <option value="image">Image</option>
+        <option value="video">Video</option>
+      </select>
+    </label>
+    <label>Overlay File: <input type="file" id="overlayFile" accept="image/*,video/*" required></label>
+    <button type="submit" class="button">Link It</button>
   </form>  <script>
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const overlay = document.getElementById("overlay");
-    const upload = document.getElementById("upload");
-    const importInput = document.getElementById("import");
+    let localLinks = {}; // { descriptors, overlayData, type }
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const overlay = document.getElementById('overlay');
 
-    let localLinks = {};
+    let streaming = false;
+    let detector;
 
-    function startCamera() {
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => {
-          video.srcObject = stream;
-          setInterval(scanFrame, 1500);
-        });
+    async function startCamera() {
+      if (!navigator.mediaDevices) return alert("Camera not supported.");
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      streaming = true;
+      setTimeout(scanLoop, 1000);
     }
 
-    function scanFrame() {
-      const ctx = canvas.getContext("2d");
+    function scanLoop() {
+      if (!streaming) return;
+      matchCameraFrame();
+      setTimeout(scanLoop, 2000);
+    }
+
+    async function matchCameraFrame() {
+      const ctx = canvas.getContext('2d');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg");
-      matchImage(dataUrl);
-    }
+      ctx.drawImage(video, 0, 0);
+      let src = cv.imread(canvas);
+      let gray = new cv.Mat();
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      let kp = new cv.KeyPointVector();
+      let desc = new cv.Mat();
+      detector.detectAndCompute(gray, new cv.Mat(), kp, desc);
 
-    upload.onchange = (e) => {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        matchImage(reader.result);
-      };
-      reader.readAsDataURL(file);
-    };
+      let bestMatch = null;
+      let maxGood = 0;
 
-    function matchImage(dataURL) {
-      let matched = false;
       for (let key in localLinks) {
-        if (simpleHash(dataURL) === key) {
-          const item = localLinks[key];
-          if (item.type === 'image') {
-            overlay.src = item.data;
-            overlay.style.display = 'block';
-          } else if (item.type === 'video') {
-            overlay.style.display = 'none';
-            let existing = document.getElementById("videoOverlay");
-            if (existing) existing.remove();
-            let vid = document.createElement('video');
-            vid.src = item.data;
-            vid.autoplay = true;
-            vid.controls = true;
-            vid.id = "videoOverlay";
-            vid.style.position = 'absolute';
-            vid.style.top = '50%';
-            vid.style.left = '50%';
-            vid.style.transform = 'translate(-50%, -50%)';
-            vid.style.maxWidth = '90vw';
-            vid.style.maxHeight = '60vh';
-            document.body.appendChild(vid);
+        let data = localLinks[key];
+        let d2 = cv.matFromArray(data.descriptors.length, data.descriptors[0].length, cv.CV_32F, data.descriptors.flat());
+        let matches = new cv.DMatchVectorVector();
+        let bf = new cv.BFMatcher();
+        bf.knnMatch(desc, d2, matches, 2);
+
+        let good = 0;
+        for (let i = 0; i < matches.size(); i++) {
+          let m = matches.get(i);
+          if (m.size() >= 2 && m.get(0).distance < 0.75 * m.get(1).distance) {
+            good++;
           }
-          matched = true;
-          break;
+        }
+        if (good > maxGood && good > 10) {
+          maxGood = good;
+          bestMatch = data;
         }
       }
-      if (!matched) {
-        overlay.style.display = 'none';
+
+      if (bestMatch) {
+        if (bestMatch.type === 'image') {
+          overlay.src = bestMatch.overlay;
+          overlay.style.display = 'block';
+        } else if (bestMatch.type === 'video') {
+          let vid = document.getElementById('vidOverlay');
+          if (!vid) {
+            vid = document.createElement('video');
+            vid.id = 'vidOverlay';
+            vid.src = bestMatch.overlay;
+            vid.autoplay = true;
+            vid.controls = true;
+            vid.style.position = 'absolute';
+            vid.style.top = '20%';
+            vid.style.left = '50%';
+            vid.style.transform = 'translateX(-50%)';
+            vid.style.maxWidth = '80vw';
+            document.body.appendChild(vid);
+          }
+        }
       }
+
+      gray.delete(); src.delete(); kp.delete(); desc.delete();
     }
 
-    function simpleHash(str) {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
-      }
-      return hash.toString();
+    document.getElementById('linkForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const pFile = document.getElementById('linkPolaroid').files[0];
+      const overlayType = document.getElementById('overlayType').value;
+      const overlayFile = document.getElementById('overlayFile').files[0];
+
+      const pData = await readAsDataURL(pFile);
+      const img = new Image();
+      img.src = pData;
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        let src = cv.imread(canvas);
+        let gray = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        let kp = new cv.KeyPointVector();
+        let desc = new cv.Mat();
+        detector.detectAndCompute(gray, new cv.Mat(), kp, desc);
+
+        const descriptors = [];
+        for (let r = 0; r < desc.rows; r++) {
+          let row = [];
+          for (let c = 0; c < desc.cols; c++) {
+            row.push(desc.floatAt(r, c));
+          }
+          descriptors.push(row);
+        }
+
+        readAsDataURL(overlayFile).then(overlayData => {
+          const id = Date.now();
+          localLinks[id] = {
+            descriptors,
+            overlay: overlayData,
+            type: overlayType
+          };
+          alert('Linked! You can now scan this polaroid.');
+        });
+
+        gray.delete(); src.delete(); kp.delete(); desc.delete();
+      };
+    };
+
+    function readAsDataURL(file) {
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
     }
+
+    document.getElementById('uploadPolaroid').onchange = async (e) => {
+      const file = e.target.files[0];
+      const url = await readAsDataURL(file);
+      const img = new Image();
+      img.src = url;
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        matchCameraFrame();
+      };
+    };
+
+    document.getElementById('importLinks').onchange = async (e) => {
+      const file = e.target.files[0];
+      const text = await file.text();
+      localLinks = JSON.parse(text);
+      alert('Links imported.');
+    };
 
     function exportLinks() {
       const blob = new Blob([JSON.stringify(localLinks)], { type: 'application/json' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'ar-links.json';
-      link.click();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ar-links.json';
+      a.click();
     }
 
-    importInput.onchange = (e) => {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        localLinks = JSON.parse(reader.result);
-        alert('Imported successfully!');
-      };
-      reader.readAsText(file);
-    };
-
-    document.getElementById("linkForm").onsubmit = (e) => {
-      e.preventDefault();
-      const polaroid = document.getElementById("polaroidInput").files[0];
-      const linkType = document.getElementById("linkType").value;
-      const file = document.getElementById("linkFile").files[0];
-      if (!polaroid || !file) return;
-
-      const reader1 = new FileReader();
-      reader1.onload = () => {
-        const hash = simpleHash(reader1.result);
-        const reader2 = new FileReader();
-        reader2.onload = () => {
-          localLinks[hash] = { type: linkType, data: reader2.result };
-          alert("Link saved locally! Now scan/upload this polaroid to see it in AR.");
-        };
-        reader2.readAsDataURL(file);
-      };
-      reader1.readAsDataURL(polaroid);
-    };
+    // OpenCV detector init
+    document.addEventListener("opencvready", () => {
+      detector = new cv.ORB();
+    });
   </script></body>
 </html>
