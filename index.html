@@ -1,0 +1,220 @@
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Romantic AR Overlay</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(to right, #fce4ec, #f8bbd0);
+      color: #333;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 2rem;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    h1 {
+      font-size: 2rem;
+      color: #d81b60;
+      margin-bottom: 1rem;
+    }
+    #cameraContainer {
+      position: relative;
+      width: 90vw;
+      max-width: 600px;
+      height: 60vh;
+      background: #fce4ec;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+    }
+    #video, #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border: none;
+      z-index: 1;
+    }
+    #overlay {
+      z-index: 2;
+      pointer-events: none;
+      display: none;
+    }
+    #controls, #linkForm {
+      margin-top: 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+    .button, label[for="upload"], label[for="import"] {
+      padding: 10px 20px;
+      background-color: #d81b60;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    input[type="file"], input[type="text"], select {
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    form {
+      background: rgba(255, 255, 255, 0.8);
+      padding: 1rem;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 400px;
+      margin: 1rem auto;
+    }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>💕 Romantic AR Polaroid Viewer 💕</h1>  <div id="cameraContainer">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="overlay" />
+  </div>
+  <canvas id="canvas"></canvas>  <div id="controls">
+    <button class="button" onclick="startCamera()">Start Camera</button>
+    <label class="button" for="upload">Upload Polaroid</label>
+    <input type="file" id="upload" accept="image/*" style="display: none;" />
+    <button class="button" onclick="exportLinks()">Export Links</button>
+    <label class="button" for="import">Import</label>
+    <input type="file" id="import" accept="application/json" style="display: none;" />
+  </div>  <form id="linkForm">
+    <h3>🔗 Create a Link</h3>
+    <input type="file" id="polaroidInput" accept="image/*" required />
+    <select id="linkType">
+      <option value="image">Image</option>
+      <option value="video">Video</option>
+    </select>
+    <input type="file" id="linkFile" accept="image/*,video/*" required />
+    <button type="submit" class="button">Link It!</button>
+  </form>  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const overlay = document.getElementById("overlay");
+    const upload = document.getElementById("upload");
+    const importInput = document.getElementById("import");
+
+    let localLinks = {};
+
+    function startCamera() {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+          video.srcObject = stream;
+          setInterval(scanFrame, 1500);
+        });
+    }
+
+    function scanFrame() {
+      const ctx = canvas.getContext("2d");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg");
+      matchImage(dataUrl);
+    }
+
+    upload.onchange = (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        matchImage(reader.result);
+      };
+      reader.readAsDataURL(file);
+    };
+
+    function matchImage(dataURL) {
+      let matched = false;
+      for (let key in localLinks) {
+        if (simpleHash(dataURL) === key) {
+          const item = localLinks[key];
+          if (item.type === 'image') {
+            overlay.src = item.data;
+            overlay.style.display = 'block';
+          } else if (item.type === 'video') {
+            overlay.style.display = 'none';
+            let existing = document.getElementById("videoOverlay");
+            if (existing) existing.remove();
+            let vid = document.createElement('video');
+            vid.src = item.data;
+            vid.autoplay = true;
+            vid.controls = true;
+            vid.id = "videoOverlay";
+            vid.style.position = 'absolute';
+            vid.style.top = '50%';
+            vid.style.left = '50%';
+            vid.style.transform = 'translate(-50%, -50%)';
+            vid.style.maxWidth = '90vw';
+            vid.style.maxHeight = '60vh';
+            document.body.appendChild(vid);
+          }
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        overlay.style.display = 'none';
+      }
+    }
+
+    function simpleHash(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+      }
+      return hash.toString();
+    }
+
+    function exportLinks() {
+      const blob = new Blob([JSON.stringify(localLinks)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'ar-links.json';
+      link.click();
+    }
+
+    importInput.onchange = (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        localLinks = JSON.parse(reader.result);
+        alert('Imported successfully!');
+      };
+      reader.readAsText(file);
+    };
+
+    document.getElementById("linkForm").onsubmit = (e) => {
+      e.preventDefault();
+      const polaroid = document.getElementById("polaroidInput").files[0];
+      const linkType = document.getElementById("linkType").value;
+      const file = document.getElementById("linkFile").files[0];
+      if (!polaroid || !file) return;
+
+      const reader1 = new FileReader();
+      reader1.onload = () => {
+        const hash = simpleHash(reader1.result);
+        const reader2 = new FileReader();
+        reader2.onload = () => {
+          localLinks[hash] = { type: linkType, data: reader2.result };
+          alert("Link saved locally! Now scan/upload this polaroid to see it in AR.");
+        };
+        reader2.readAsDataURL(file);
+      };
+      reader1.readAsDataURL(polaroid);
+    };
+  </script></body>
+</html>
